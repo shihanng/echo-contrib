@@ -61,6 +61,8 @@ type (
 		// Enforcer CasbinAuth main rule.
 		// Required.
 		Enforcer *casbin.Enforcer
+
+		Enforce func(echo.Context, *casbin.Enforcer) (bool, error)
 	}
 )
 
@@ -89,13 +91,19 @@ func MiddlewareWithConfig(config Config) echo.MiddlewareFunc {
 		config.Skipper = DefaultConfig.Skipper
 	}
 
+	if config.Enforce == nil {
+		config.Enforce = func(c echo.Context, _ *casbin.Enforcer) (bool, error) {
+			return config.CheckPermission(c)
+		}
+	}
+
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			if config.Skipper(c) {
 				return next(c)
 			}
 
-			if pass, err := config.CheckPermission(c); err == nil && pass {
+			if pass, err := config.Enforce(c, config.Enforcer); err == nil && pass {
 				return next(c)
 			} else if err != nil {
 				return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
