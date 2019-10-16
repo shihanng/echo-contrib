@@ -36,6 +36,44 @@ func testRequest(t *testing.T, ce *casbin.Enforcer, user string, path string, me
 	}
 }
 
+func testPostRequestContext(t *testing.T, ce *casbin.Enforcer, user string, path string, scope string, code int) {
+	e := echo.New()
+	req := httptest.NewRequest(echo.POST, path, nil)
+	res := httptest.NewRecorder()
+	c := e.NewContext(req, res)
+	c.Set("user", user)
+	c.Set("scope", scope)
+
+	cfg := Config{
+		Enforcer: ce,
+		Enforce: func(c echo.Context, ce *casbin.Enforcer) (bool, error) {
+			user := c.Get("user")
+			scope := c.Get("scope")
+			path := c.Request().URL.Path
+			return ce.Enforce(user, path, scope)
+		},
+	}
+	h := MiddlewareWithConfig(cfg)(func(c echo.Context) error {
+		return c.String(http.StatusOK, "test")
+	})
+
+	err := h(c)
+
+	if err != nil {
+		if errObj, ok := err.(*echo.HTTPError); ok {
+			if errObj.Code != code {
+				t.Errorf("%d, supposed to be %d", errObj.Code, code)
+			}
+		} else {
+			t.Error(err)
+		}
+	} else {
+		if c.Response().Status != code {
+			t.Errorf("%d, supposed to be %d", c.Response().Status, code)
+		}
+	}
+}
+
 func TestAuth(t *testing.T) {
 	ce, _ := casbin.NewEnforcer("auth_model.conf", "auth_policy.csv")
 
@@ -43,6 +81,11 @@ func TestAuth(t *testing.T) {
 	testRequest(t, ce, "alice", "/dataset1/resource1", echo.POST, 200)
 	testRequest(t, ce, "alice", "/dataset1/resource2", echo.GET, 200)
 	testRequest(t, ce, "alice", "/dataset1/resource2", echo.POST, 403)
+
+	testPostRequestContext(t, ce, "alice", "/dataset1/resource1", echo.GET, 200)
+	testPostRequestContext(t, ce, "alice", "/dataset1/resource1", echo.POST, 200)
+	testPostRequestContext(t, ce, "alice", "/dataset1/resource2", echo.GET, 200)
+	testPostRequestContext(t, ce, "alice", "/dataset1/resource2", echo.POST, 403)
 }
 
 func TestPathWildcard(t *testing.T) {
